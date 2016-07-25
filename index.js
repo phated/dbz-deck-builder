@@ -4,10 +4,6 @@ var yo = require('yo-yo');
 var diff = require('diffhtml');
 var html = diff.html;
 var csjs = require('csjs-inject');
-var velocity = require('velocity-animate');
-var inlineTransitions = require('diffhtml-inline-transitions');
-
-inlineTransitions(diff);
 
 var cards = [
   {
@@ -88,22 +84,7 @@ var classes = csjs`
     transition: max-height 2s;
   }
 
-  .moreDetails {
-    animation-duration: 150ms;
-    animation-name: slidein;
-    transform-origin: top;
-  }
-
-  @keyframes slidein {
-    from {
-      height: 0;
-      transform: scaleY(0);
-    }
-    to {
-      height: auto;
-      transform: scaleY(1);
-    }
-  }
+  .moreDetails {}
 
   .cardTitle {
     flex-grow: 1;
@@ -161,26 +142,6 @@ var classes = csjs`
   }
 `;
 
-// function slideIn() {
-//   console.log(arguments);
-//   var el = this;
-//   return new Promise(function(resolve, reject) {
-//     velocity(el, 'slideDown', { duration: 200, complete: resolve });
-//   });
-// }
-
-// function slideOut() {
-//   console.log(arguments);
-//   var el = this;
-//   if (!el.classList.contains(classes.moreDetails)) {
-//     console.log('no match');
-//     return;
-//   }
-//   return new Promise(function(resolve, reject) {
-//     velocity(el, 'slideUp', { duration: 200, complete: resolve });
-//   });
-// }
-
 function container() {
   var els = model.map((card) => cardView(card));
 
@@ -231,19 +192,6 @@ function toggleExpanded(card) {
   card.expanded = !card.expanded;
 
   update();
-  // if (!card.expanded) {
-  //   var el = document.getElementById(card.id);
-
-  //   if (!el) {
-  //     return;
-  //   }
-
-  //   ;
-  // } else {
-  //   update();
-  //   var el = document.getElementById(card.id);
-  //   ;
-  // }
 }
 
 // var el = container();

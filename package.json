@@ -15,7 +15,6 @@
   "dependencies": {
     "csjs-inject": "^1.0.0",
     "diffhtml": "^0.9.1",
-    "velocity-animate": "^1.2.3",
     "yo-yo": "^1.2.2"
   }
 }
