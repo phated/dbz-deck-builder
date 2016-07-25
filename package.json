@@ -1,0 +1,21 @@
+{
+  "name": "dbz-deck-builder",
+  "version": "0.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "budo index.js --live --open --dir ."
+  },
+  "author": "Blaine Bublitz <blaine.bublitz@gmail.com> (https://github.com/phated)",
+  "license": "MIT",
+  "devDependencies": {
+    "budo": "^8.3.0"
+  },
+  "dependencies": {
+    "csjs-inject": "^1.0.0",
+    "diffhtml": "^0.9.1",
+    "velocity-animate": "^1.2.3",
+    "yo-yo": "^1.2.2"
+  }
+}
