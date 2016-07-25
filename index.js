@@ -26,11 +26,13 @@ var cards = [
 ];
 
 var model = [];
+var deck = [];
 
 for (var x = 0; x < 100; x++) {
   model.push(Object.assign({}, cards[x % 2], {
     id: x,
-    expanded: false
+    expanded: false,
+    used: 0
   }));
 }
 
@@ -84,7 +86,9 @@ var classes = csjs`
     transition: max-height 2s;
   }
 
-  .moreDetails {}
+  .moreDetails {
+    padding-bottom: 5px;
+  }
 
   .cardTitle {
     flex-grow: 1;
@@ -92,12 +96,8 @@ var classes = csjs`
     margin-bottom: 5px;
   }
 
-  .cardType {
+  .cardDetailLine {
     margin-bottom: 5px;
-  }
-
-  .cardText {
-    margin-bottom: 10px;
   }
 
   .cardCounts {
@@ -145,10 +145,10 @@ var classes = csjs`
 function container() {
   var els = model.map((card) => cardView(card));
 
-  return html`<div>
+  return yo`<div>
     <nav className="${classes.navbar}">Deck Builder</nav>
     <div>
-      <div className="${classes.deckInfo}">Deck Count: 42</div>
+      <div className="${classes.deckInfo}">Deck Count: ${deck.length}</div>
       ${els}
     </div>
   </div>`;
@@ -157,15 +157,42 @@ function container() {
 function cardView(card) {
   var moreDetailsEl;
   if (card.expanded) {
-    moreDetailsEl = html`
+    let enduranceEl;
+    if (card.endurance) {
+      enduranceEl = yo`
+        <div className="${classes.cardDetailLine}">
+          Endurance: ${card.endurance}
+        </div>
+      `;
+    }
+    let levelEl;
+    if (card.level) {
+      levelEl = yo`
+        <div className="${classes.cardDetailLine}">
+          Level: ${card.level}
+        </div>
+      `;
+    }
+    let purEl;
+    if (card.pur) {
+      purEl = yo`
+        <div className="${classes.cardDetailLine}">
+          PUR: ${card.pur}
+        </div>
+      `;
+    }
+    moreDetailsEl = yo`
       <div className="${classes.moreDetails}">
-        <div className="${classes.cardType}">${card.type}</div>
-        <div className="${classes.cardText}">${card.text}</div>
+        ${enduranceEl}
+        ${levelEl}
+        ${purEl}
+        <div className="${classes.cardDetailLine}">${card.type}</div>
+        <div className="${classes.cardDetailLine}">${card.text}</div>
       </div>
     `;
   }
 
-  return html`
+  return yo`
     <div className=${classes.listItem}>
       <img className="${classes.cardThumbnail}" src="${card.image}">
       <div className="${classes.cardDetails}" onclick=${toggleExpanded.bind(null, card)}>
@@ -173,19 +200,24 @@ function cardView(card) {
         ${moreDetailsEl}
         <div className="${classes.cardCounts}">
           <div>Limit: ${card.limit}</div>
-          <div>Used: 2</div>
-          <div>Free: 1</div>
+          <div>Used: ${card.used}</div>
+          <div>Free: ${card.limit - card.used}</div>
         </div>
       </div>
-      <button className="${classes.addToDeckButton}" onclick=${onClick}>
+      <button className="${classes.addToDeckButton}" onclick=${addToDeck.bind(null, card)}>
         <span className="${classes.visuallyhidden}">Add To Deck</span>
       </button>
     </div>
   `;
 }
 
-function onClick() {
-  console.log('add to deck');
+function addToDeck(card) {
+  if (card.used < card.limit) {
+    deck.push(card);
+    card.used++;
+
+    update();
+  }
 }
 
 function toggleExpanded(card) {
