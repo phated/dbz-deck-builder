@@ -1,238 +1,542 @@
 'use strict';
 
+var _ = require('lodash');
 var yo = require('yo-yo');
-var diff = require('diffhtml');
-var html = diff.html;
-var csjs = require('csjs-inject');
 
-var cards = [
-  {
-    title: 'Blue Head Knock',
-    image: 'c27_blue_head_knock.jpg',
-    limit: 3,
-    type: 'Physical Combat',
-    text: `Physical Attack. Lower your opponent's anger to 0. DAMAGE: 5 life cards.`,
-    endurance: 2
+var classes = require('./classes');
+
+var redux = require('redux');
+var createActorMiddleware = require('redux-pull-actors');
+var pull = require('pull-stream');
+var prom = require('pull-promise');
+
+var sift = require('sift');
+var groupBy = require('group-array');
+var reduce = require('object.reduce');
+
+var fork = require('./fork');
+
+var reducers = redux.combineReducers({
+  cards: function(state, action) {
+    state = state || [];
+
+    switch(action.type) {
+      case 'data_loaded':
+        return action.payload.map((card) => Object.assign({}, card, {
+          expanded: false,
+          // type_display: 'Main Personality',
+          image: `http://${window.location.hostname}:8080${card.image}`
+        }));
+      default:
+        return state;
+    }
   },
-  {
-    title: 'Captain Ginyu, Leader',
-    image: 'c6_captain_ginyu_leader.jpg',
-    limit: 3,
-    type: 'Main Personality',
-    text: `POWER: Energy attack costing 3 stages. DAMAGE: 4 life cards. Search your Life Deck for an Ally and place it into play at 4 power stages above 0. HIT: Choose one of your Allies in play, that Ally can make actions regardless of your MP's power stage this combat.`,
-    level: 1,
-    pur: 2
+  deck: function(state, action) {
+    state = state || [];
+
+    switch(action.type) {
+      case 'add_to_deck': {
+        return state.concat(action.payload);
+      }
+      case 'remove_from_deck': {
+        return state.filter((card) => card.id !== action.payload.id);
+      }
+      default:
+        return state;
+    }
+  },
+  phase: function(state, action) {
+    state = state || 'mp';
+
+    switch(action.type) {
+      case 'update_phase':
+        return action.payload;
+      default:
+        return state;
+    }
+  },
+  filters: function(state, action) {
+    state = state || [];
+
+    switch(action.type) {
+      case 'add_filters':
+        return _.unionWith(state, action.payload, _.isEqual);
+      case 'remove_filters':
+        return _.differenceWith(state, action.payload, _.isEqual);
+      case 'replace_filters':
+        return [].concat(action.payload);
+      default:
+        return state;
+    }
   }
-];
+});
 
-var model = [];
-var deck = [];
-
-for (var x = 0; x < 100; x++) {
-  model.push(Object.assign({}, cards[x % 2], {
-    id: x,
-    expanded: false,
-    used: 0
-  }));
+function personalityFilter() {
+  return pull(
+    pull.filter(function(incoming) {
+      var card = incoming.action.payload;
+      return (incoming.action.type === 'add_to_deck' && card.type === 'main_personality');
+    }),
+    pull.map(function(incoming) {
+      var card = incoming.action.payload;
+      var alignment = card.alignment;
+      var personality = card.personality;
+      var level = card.level;
+      var id = card.id;
+      return {
+        type: 'add_filters',
+        payload: [
+          { $or: [ { id: id }, { level: { $ne: level } } ] },
+          { personality: { $or: [personality, { $exists: false }] } },
+          { $or: [ { alignment: alignment }, { alignment: 'neutral' } ] }
+        ]
+      };
+    })
+  );
 }
 
-var black = '#303030';
-var gray = '#808080';
-var lightgray = '#d3d3d3';
+function masteryFilter() {
+  return pull(
+    pull.filter(function(incoming) {
+      return incoming.action.type === 'add_to_deck';
+    }),
+    pull.map(function(incoming) {
+      var deck = incoming.state.deck;
+      var personality;
 
-var classes = csjs`
-  body {
-    display: block;
-    margin: 0 8px;
-    padding-top: 45px;
+      var levels = deck.reduce(function(acc, val) {
+        if (val.type === 'main_personality') {
+          // TODO: avoid mutation
+          personality = val.personality;
+          return acc.concat(val.level);
+        }
+
+        return acc;
+      }, []);
+
+      var filtersToRemove = deck.reduce(function(acc, val) {
+        if (val.type === 'main_personality') {
+          return acc.concat({ $or: [ { id: val.id }, { level: { $ne: val.level } } ] });
+        }
+
+        return acc;
+      }, []);
+
+      if (levels.includes(1) && levels.includes(2) && levels.includes(3) && levels.includes(4)) {
+        return [
+          {
+            type: 'update_phase',
+            payload: 'mastery'
+          },
+          {
+            type: 'add_filters',
+            payload: [
+              { type: 'mastery' }
+            ]
+          },
+          {
+            type: 'remove_filters',
+            payload: [
+              { type: 'main_personality' },
+              { personality: personality }
+            ].concat(filtersToRemove)
+          }
+        ];
+      }
+    }),
+    pull.flatten()
+  );
+}
+
+function cardsFilter() {
+  return pull(
+    pull.filter(function(incoming) {
+      return incoming.action.type === 'add_to_deck';
+    }),
+    pull.map(function(incoming) {
+      var card = incoming.action.payload;
+      if (card.type === 'mastery') {
+        return [
+          {
+            type: 'update_phase',
+            payload: 'cards'
+          },
+          {
+            type: 'add_filters',
+            payload: [
+              { type: { $or: ['physical_combat', 'energy_combat', 'event', 'ally', 'dragonball', 'setup', 'drill'] } },
+              // TODO: make "style"
+              // { style: ''}
+              { color: { $or: [card.style, 'freestyle'] } }
+            ]
+          },
+          {
+            type: 'remove_filters',
+            payload: [
+              { type: 'mastery' }
+            ]
+          }
+        ];
+      }
+    }),
+    pull.flatten()
+  );
+}
+
+function initFilter() {
+  return pull(
+    pull.filter(function(incoming) {
+      return incoming.action.type === 'data_loaded';
+    }),
+    pull.map(function() {
+      return {
+        type: 'add_filters',
+        payload: [
+          { type: 'main_personality' }
+        ]
+      }
+    })
+  );
+}
+
+var actors = createActorMiddleware({
+  log: function() {
+    return pull.map(console.log.bind(console));
+  },
+  loadData: function() {
+    return pull(
+      pull.filter(function(incoming) {
+        return incoming.action.type === 'load_data';
+      }),
+      prom.through(function(incoming) {
+        return fetch(incoming.action.payload)
+          .then(function(response) {
+            return response.json();
+          })
+          .then(function(result) {
+            return { type: 'data_loaded', payload: result };
+          });
+      })
+    );
+  },
+  addToDeck: function() {
+    return pull(
+      pull.filter(function(incoming) {
+        return incoming.action.type === 'attempt_add_to_deck';
+      }),
+      pull.map(function(incoming) {
+        var card = incoming.action.payload;
+        var deck = incoming.state.deck;
+        var used = count(deck, card.id);
+        if (used < card.limit) {
+          return {
+            type: 'add_to_deck',
+            payload: card
+          };
+        }
+      })
+    );
+  },
+  removeFromDeck: function() {
+    return pull(
+      pull.filter(function(incoming) {
+        return incoming.action.type === 'attempt_remove_from_deck';
+      }),
+      pull.map(function(incoming) {
+        var card = incoming.action.payload;
+        var deck = incoming.state.deck;
+        var used = count(deck, card.id);
+        if (used > 0) {
+          return {
+            type: 'remove_from_deck',
+            payload: card
+          };
+        }
+      })
+    );
+  },
+  applyFilter: function() {
+    return fork([
+      personalityFilter(),
+      initFilter(),
+      masteryFilter(),
+      cardsFilter()
+    ]);
+  },
+  removeFilter: function() {
+    // TODO: switch phase when a personality or mastery is removed
+    return pull(
+      pull.filter(function(incoming) {
+        return incoming.action.type === 'remove_from_deck';
+      }),
+      pull.map(function(incoming) {
+        var card = incoming.action.payload;
+        if (card.type === 'main_personality') {
+          var alignment = card.alignment;
+          var personality = card.personality;
+          var level = card.level;
+          var id = card.id;
+
+          var personalityRemain = _.some(incoming.state.deck, { personality: personality });
+          var alignmentRemain = _.some(incoming.state.deck, { alignment: alignment });
+
+          var filters = [
+            { $or: [ { id: id }, { level: { $ne: level } } ] },
+          ]
+
+          if (!personalityRemain) {
+            filters.push({ personality: personality });
+          }
+
+          if (!alignmentRemain) {
+            filters.push({ alignment: alignment });
+          }
+
+          return {
+            type: 'remove_filters',
+            payload: filters
+          };
+        }
+      })
+    );
+  }
+});
+var middleware = redux.applyMiddleware(actors)
+var store = redux.createStore(reducers, middleware);
+
+function filter(cards, filters) {
+  return sift({ $and: filters }, cards);
+}
+
+function flatten(grouped) {
+  return reduce(grouped, function(result, arr) {
+    return result.concat(arr);
+  }, []);
+}
+
+// TODO: specific to MPs
+function groupMPs(cards) {
+  var grouped = groupBy(cards, 'personality');
+  return flatten(grouped);
+}
+
+function groupMasteries(cards) {
+  var grouped = groupBy(cards, 'style');
+  return flatten(grouped);
+}
+
+function cardListView() {
+  var state = store.getState();
+  // var cardList = state.cards.filter(applyFilters(state.filters)).map(cardView);
+  var cardList = filter(state.cards, state.filters);
+
+  var cards;
+  if (state.phase === 'mp') {
+    cards = groupMPs(cardList).map(cardView);
   }
 
-  .navbar {
-    box-sizing: border-box;
-    padding: 10px 8px;
-    background: ${black};
-    height: 45px;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    box-shadow: 0 -10px 10px 10px ${gray};
-    color: #fff;
-    font-size: 20px;
-    line-height: 25px;
-    display: flex;
+  if (state.phase === 'mastery') {
+    cards = groupMasteries(cardList).map(cardView);
   }
 
-  .listItem {
-    box-sizing: border-box;
-    display: flex;
-    justify-content: space-between;
-    padding: 8px 0;
-    min-height: 70px;
-    border-bottom: 1px solid ${lightgray};
+  if (state.phase === 'cards') {
+    cards = cardList.map(cardView);
   }
 
-  .cardThumbnail {
-    border-radius: 3px;
-    max-width: 100%;
-    max-height: 53px;
-  }
-
-  .cardDetails {
-    padding: 0 10px;
-    flex-grow: 1;
-    display: flex;
-    flex-direction: column;
-    transition: max-height 2s;
-  }
-
-  .moreDetails {
-    padding-bottom: 5px;
-  }
-
-  .cardTitle {
-    flex-grow: 1;
-    font-weight: 700;
-    margin-bottom: 5px;
-  }
-
-  .cardDetailLine {
-    margin-bottom: 5px;
-  }
-
-  .cardCounts {
-    display: flex;
-    justify-content: space-between;
-  }
-
-  .addToDeckButton {
-    background-color: transparent;
-    background-image: url(https://rawgit.com/driftyco/ionicons/master/src/plus-round.svg);
-    background-repeat: no-repeat;
-    background-size: 50% 50%;
-    background-position: center;
-    border: 0;
-    border-left: 1px solid ${lightgray};
-    width: 50px;
-    outline: none;
-    flex-shrink: 0;
-  }
-
-  .deckInfo {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    padding: 10px;
-    background: ${black};
-    color: #fff;
-    border-top-right-radius: 10px;
-    // box-shadow: 0 10px 10px 10px ${gray};
-  }
-
-  /* From h5bp */
-  .visuallyhidden {
-    border: 0;
-    clip: rect(0 0 0 0);
-    height: 1px;
-    margin: -1px;
-    overflow: hidden;
-    padding: 0;
-    position: absolute;
-    width: 1px;
-  }
-`;
-
-function container() {
-  var els = model.map((card) => cardView(card));
-
-  return yo`<div>
-    <nav className="${classes.navbar}">Deck Builder</nav>
-    <div>
-      <div className="${classes.deckInfo}">Deck Count: ${deck.length}</div>
-      ${els}
-    </div>
+  return yo`<div id="card-list-pane" className="${classes.pane}">
+    ${cards}
   </div>`;
 }
 
-function cardView(card) {
-  var moreDetailsEl;
-  if (card.expanded) {
-    let enduranceEl;
-    if (card.endurance) {
-      enduranceEl = yo`
-        <div className="${classes.cardDetailLine}">
-          Endurance: ${card.endurance}
-        </div>
-      `;
+function deckListView() {
+  var state = store.getState();
+  var deckList = state.deck.map(cardView);
+
+  return yo`<div id="deck-list-pane" className="${classes.pane}">
+    ${deckList}
+  </div>`;
+}
+
+function paneContainerView() {
+  return yo`<div className="pane-container">
+    ${cardListView()}
+    ${deckListView()}
+  </div>`;
+}
+
+function dotbarView(paneCount, selected) {
+  var dots = [];
+  for (var x = 0; x < paneCount; x++) {
+    var dot;
+    if (x === selected) {
+      dot = yo`<span className="dot-selected"></span>`;
+    } else {
+      dot = yo`<span></span>`;
     }
-    let levelEl;
-    if (card.level) {
-      levelEl = yo`
-        <div className="${classes.cardDetailLine}">
-          Level: ${card.level}
-        </div>
-      `;
-    }
-    let purEl;
-    if (card.pur) {
-      purEl = yo`
-        <div className="${classes.cardDetailLine}">
-          PUR: ${card.pur}
-        </div>
-      `;
-    }
-    moreDetailsEl = yo`
-      <div className="${classes.moreDetails}">
-        ${enduranceEl}
-        ${levelEl}
-        ${purEl}
-        <div className="${classes.cardDetailLine}">${card.type}</div>
-        <div className="${classes.cardDetailLine}">${card.text}</div>
-      </div>
-    `;
+    dot.innerHTML = '&middot;';
+    dots.push(dot);
+  }
+  var dotbar = yo`<div className="dotbar">
+    ${dots}
+  </div>`;
+
+  return dotbar;
+}
+
+var tabs = [
+  'Card List',
+  'Deck List',
+  // 'Statistics'
+];
+
+function navbarView(idx) {
+  idx = idx || 0;
+
+  var tabTitle = tabs[idx];
+
+  return yo`
+    <nav className="navbar">
+      <div>${tabTitle}</div>
+      ${dotbarView(tabs.length, idx)}
+    </nav>
+  `;
+}
+
+function enduranceView(card) {
+  if (!card.endurance) {
+    return;
+  }
+
+  return yo`<div className="${classes.cardDetailLine}">Endurance: ${card.endurance}</div>`;
+}
+
+function levelView(card) {
+  if (!card.level) {
+    return;
+  }
+
+  return yo`<div className="${classes.cardDetailLine}">Level: ${card.level}</div>`;
+}
+
+function purView(card) {
+  if (!card.pur) {
+    return;
+  }
+
+  return yo`<div className="${classes.cardDetailLine}">PUR: ${card.pur}</div>`;
+}
+
+function moreDetailsView(card) {
+  if (!card.expanded) {
+    return;
   }
 
   return yo`
-    <div className=${classes.listItem}>
-      <img className="${classes.cardThumbnail}" src="${card.image}">
-      <div className="${classes.cardDetails}" onclick=${toggleExpanded.bind(null, card)}>
-        <div className="${classes.cardTitle}">${card.title}</div>
-        ${moreDetailsEl}
-        <div className="${classes.cardCounts}">
-          <div>Limit: ${card.limit}</div>
-          <div>Used: ${card.used}</div>
-          <div>Free: ${card.limit - card.used}</div>
-        </div>
-      </div>
-      <button className="${classes.addToDeckButton}" onclick=${addToDeck.bind(null, card)}>
-        <span className="${classes.visuallyhidden}">Add To Deck</span>
-      </button>
+    <div className="${classes.moreDetails}">
+      ${enduranceView(card)}
+      ${levelView(card)}
+      ${purView(card)}
+      <div className="${classes.cardDetailLine}">${card.type}</div>
+      <div className="${classes.cardDetailLine}">${card.ability}</div>
     </div>
   `;
 }
 
-function addToDeck(card) {
-  if (card.used < card.limit) {
-    deck.push(card);
-    card.used++;
+function count(deck, id) {
+  return _.reduce(deck, function(count, card) {
+    if (card.id === id) {
+      return count + 1;
+    } else {
+      return count;
+    }
+  }, 0);
+}
 
-    update();
+function cardView(card) {
+  var state = store.getState();
+  var used = count(state.deck, card.id);
+  var free = (card.limit - used);
+  var changeButton;
+  if (free) {
+    changeButton = yo`
+      <button className="${classes.addToDeckButton}" onclick=${eventHandler('attempt_add_to_deck', card)}>
+        <span className="${classes.visuallyhidden}">Add To Deck</span>
+      </button>
+    `;
+  } else {
+    changeButton = yo`
+      <button className="${classes.removeFromDeckButton}" onclick=${eventHandler('attempt_remove_from_deck', card)}>
+        <span className="${classes.visuallyhidden}">Remove From Deck</span>
+      </button>
+    `;
+  }
+
+  return yo`
+    <div id=${card.id} className=${classes.listItem}>
+      <img className="${classes.cardThumbnail}" src="${card.image}" />
+      <div className="${classes.cardDetails}" onclick=${toggleExpanded.bind(null, card)}>
+        <div className="${classes.cardTitle}">${card.title}</div>
+        ${moreDetailsView(card)}
+        <div className="${classes.cardCounts}">
+          <div>Limit: ${card.limit}</div>
+          <div>Used: ${used}</div>
+          <div>Free: ${card.limit - used}</div>
+        </div>
+      </div>
+      ${changeButton}
+    </div>
+  `;
+}
+
+function eventHandler(type, payload) {
+  return function() {
+    store.dispatch({ type: type, payload: payload });
   }
 }
 
 function toggleExpanded(card) {
   card.expanded = !card.expanded;
 
-  update();
+  updatePanes();
 }
 
-// var el = container();
+function updatePanes() {
+  var cardListPaneEl = document.querySelector('#card-list-pane');
+  var deckListPaneEl = document.querySelector('#deck-list-pane');
 
-var el = document.createElement('div');
-
-function update() {
-  diff.outerHTML(el, container());
+  yo.update(cardListPaneEl, cardListView());
+  yo.update(deckListPaneEl, deckListView());
 }
 
-document.body.appendChild(el);
-update();
+var paneContainerEl = document.querySelector('.pane-container');
+yo.update(paneContainerEl, paneContainerView());
+
+function updateNavbar(idx) {
+  var navbarEl = document.querySelector('.navbar');
+
+  yo.update(navbarEl, navbarView(idx));
+}
+
+var attach = require('./tabs');
+var tabEE = attach(paneContainerEl);
+
+tabEE.on('tab-shown', updateNavbar);
+
+store.dispatch({ type: 'load_data', payload: `http://${window.location.hostname}:8080/cards` });
+
+var renderRequested = false;
+
+store.subscribe(function() {
+  if (renderRequested) {
+    return;
+  }
+
+  renderRequested = true;
+  requestAnimationFrame(function() {
+    updatePanes();
+    renderRequested = false;
+  });
+  // updatePanes();
+});
+
+window.store = store;
