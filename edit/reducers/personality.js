@@ -1,6 +1,6 @@
 'use strict';
 
-var defaultState = '';
+var defaultState = null;
 
 function personality(state, action) {
   state = state || defaultState;
@@ -9,7 +9,7 @@ function personality(state, action) {
 
   switch(action.type) {
     case 'update_personality':
-      return card.personality;
+      return card.personality != null ? card.personality : null;
     case 'load_form':
       return card.personality || defaultState;
     case 'reset_form':

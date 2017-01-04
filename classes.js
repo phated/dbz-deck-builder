@@ -59,15 +59,20 @@ var classes = csjs`
   .pane {
     width: 100%;
     flex-shrink: 0;
-    overflow: auto;
+    overflow-x: auto;
     align-self: flex-start;
     height: 100%;
     padding: 0 8px;
     box-sizing: border-box;
+    /*
+      Ref https://github.com/hammerjs/hammer.js/issues/1056 and
+      https://github.com/hammerjs/hammer.js/issues/1050
+     */
+    touch-action: pan-y;
   }
 
   .preventScroll {
-    overflow: hidden;
+    overflow-x: hidden;
   }
 
   .listItem {
@@ -77,6 +82,14 @@ var classes = csjs`
     padding: 8px 0;
     min-height: 70px;
     border-bottom: 1px solid ${lightgray};
+  }
+
+  .listItemHeader {
+    font-weight: 700;
+    text-align: center;
+    padding: 10px;
+    font-size: 1.1rem;
+    border-bottom: 1px solid #d3d3d3;
   }
 
   .cardThumbnail {

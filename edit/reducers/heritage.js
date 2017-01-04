@@ -1,24 +1,20 @@
 'use strict';
 
 var defaultState = {
-  attack: false,
-  block: false,
-  prevention: false,
-  instant: false,
-  constant: false
+  saiyan: false,
+  namekian: false
 };
 
-function is(state, action) {
+function heritage(state, action) {
   state = state || Object.assign({}, defaultState);
 
   var props = action.payload;
 
   switch(action.type) {
-    case 'update_is':
+    case 'update_heritage':
       return Object.assign({}, state, props);
     case 'load_form':
-      // delete props.is.named;
-      return Object.assign({}, props.is);
+      return Object.assign({}, props.heritage);
     case 'reset_form':
       return Object.assign({}, defaultState);
     default:
@@ -26,4 +22,4 @@ function is(state, action) {
   }
 }
 
-module.exports = is;
+module.exports = heritage;

@@ -129,15 +129,31 @@ function buildBody(state, ignores) {
     ignore = ignore.concat(ignores);
   }
 
-  if (state.type === 'main_personality' || state.type === 'ally') { // TODO: ally might want "freestyle" type
+  if (state.type === 'main_personality') {
     ignore = ignore.concat([
-      'style'
-    ])
+      // 'style',
+      'endurance'
+    ]);
   }
 
-  if (state.type === 'mastery') {
+  if (state.type === 'mastery' || state.type === 'dragonball') {
     ignore = ignore.concat([
       'personality',
+      'pur',
+      'level',
+      'stages',
+      'endurance'
+    ]);
+  }
+
+  if (state.type === 'ally') {
+    ignore = ignore.concat([
+      'endurance'
+    ]);
+  }
+
+  if (state.type === 'physical_combat' || state.type === 'energy_combat' || state.type === 'setup' || state.type === 'drill' || state.type === 'event') {
+    ignore = ignore.concat([
       'pur',
       'level',
       'stages'
@@ -160,7 +176,7 @@ function buildBody(state, ignores) {
         return acc2;
       }, acc);
     }
-
+    console.log(key, val);
     acc.set(key, val);
 
     return acc;
@@ -254,7 +270,7 @@ var styleOptions = [
   'saiyan',
   'namekian',
   'orange',
-  'freestyle'
+  'non-styled'
 ];
 
 // function checkboxView(id, label, value) {
@@ -340,9 +356,10 @@ function formView() {
   console.log(state);
 
   var personalityFields;
-  if (state.type === 'main_personality') {
+  if (state.type === 'main_personality' || state.type === 'ally') {
     personalityFields = [
-      StatefulInput('Personality', 'personality'),
+      StatefulCheckbox('Saiyan Heritage?', 'heritage.saiyan'),
+      StatefulCheckbox('Namekian Heritage?', 'heritage.namekian'),
       StatefulInput('PUR', 'pur'),
       StatefulInput('Level', 'level'),
       stagesView()
@@ -350,25 +367,18 @@ function formView() {
   }
 
   var styledFields;
-  // if (card.type === 'physical combat' || card.type === 'energy combat' || card.type === 'event' || card.type === 'setup' || card.type === 'drill') {
-  //   styledFields = [
-  //     checkboxView('has[endurance]', 'Has Endurance?', false),
-  //     Input({ id: 'endurance', label: 'Endurance', value: card.endurance }),
-  //     selectView('style', 'Style', styleOptions, card.color),
-  //     checkboxView('is[named]', 'Is Named?', false),
-  //     checkboxView('has[attach]', 'Is Attachable?', false),
-  //     checkboxView('is[bau]', 'Is BAU?', false),
-  //   ];
-  // }
-
-  var masteryFields;
-  if (state.type === 'mastery') {
-    masteryFields = [
-      StatefulSelect('Style', 'style', styleOptions)
+  if (state.type === 'physical_combat' || state.type === 'energy_combat' || state.type === 'event' || state.type === 'setup' || state.type === 'drill') {
+    styledFields = [
+      StatefulCheckbox('Has Endurance?', 'has.endurance'),
+      StatefulInput('Endurance', 'endurance'),
+      StatefulCheckbox('Is Attachable?', 'has.attach'),
+      StatefulCheckbox('Is BAU?', 'has.banish_after_use')
     ];
   }
 
   var conditionals = [
+    StatefulCheckbox('Is Named?', 'considered.named'),
+    StatefulCheckbox('Is Styled?', 'considered.styled'),
     StatefulCheckbox('Is Attack?', 'is.attack'),
     StatefulCheckbox('Is Block?', 'is.block'),
     StatefulCheckbox('Is Prevention?', 'is.prevention'),
@@ -396,7 +406,9 @@ function formView() {
     StatefulSelect('Type', 'type', cardTypeOptions),
     StatefulTextarea('Ability', 'ability'),
     StatefulInput('Limit', 'limit'),
-    StatefulSelect('Alignment', 'alignment', alignmentOptions)
+    StatefulSelect('Alignment', 'alignment', alignmentOptions),
+    StatefulSelect('Style', 'style', styleOptions),
+    StatefulInput('Personality', 'personality'),
   ];
 
   var image;
@@ -415,7 +427,6 @@ function formView() {
       <div className="${classes.form}">
         <form id="edit-card" onsubmit=${send}>
           ${defaults}
-          ${masteryFields}
           ${conditionals}
           ${styledFields}
           ${personalityFields}
@@ -508,8 +519,13 @@ function getCards() {
     .then(function(response) {
       return response.json();
     }).then(function(cards) {
+      // return cards.filter((card) => card.personality === 'trunks');
+      // return cards.filter((card) => card.color === 'saiyan' || card.style === 'saiyan');
+      // return cards.filter((card) => card.color === 'freestyle' || card.style === 'non-styled' && card.type !== 'dragonball' && card.type !== 'ally' && !(card.considered && card.considered.named));
+      // return cards.filter((card) => card.type !== 'main_personality' && card.type !== 'ally' && card.type !== 'dragonball' && card.type !== 'mastery' && card.personality != null)
+      // return cards.filter((card) => card.type === 'ally');
       return cards.filter((card) => card.type === 'mastery');
-      // return cards.filter((card) => card.type === 'mainpersonality' || card.type === 'main_personality');
+      // return cards.filter((card) => card.type === 'main_personality');
     });
 }
 

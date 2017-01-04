@@ -24,13 +24,14 @@ function attach(container) {
   var isScrolling = false;
 
   var gestures = new hammer.Manager(container);
-  var pan = new hammer.Pan({ threshold: 10 });
+  var pan = new hammer.Pan({ threshold: 0 });
   gestures.add(pan);
 
   gestures.on('panstart', onPanStart);
   gestures.on('panleft', onPanLeft);
   gestures.on('panright', onPanRight);
   gestures.on('panend pancancel', onPanEnd);
+
 
   return ee;
 
@@ -54,6 +55,7 @@ function attach(container) {
   }
 
   function onPanStart(evt) {
+    console.log(evt);
     if (evt.additionalEvent === 'panup' || evt.additionalEvent === 'pandown') {
       isScrolling = true;
       return;
@@ -75,6 +77,7 @@ function attach(container) {
     }
 
     var percent = (100 / width) * evt.deltaX;
+    console.log(percent);
     var animate = false;
 
     show(percent, animate);
@@ -96,11 +99,13 @@ function attach(container) {
   }
 
   function onPanEnd(evt) {
+    console.log(isScrolling, evt);
     if (!isScrolling) {
       var percent = (100 / width) * evt.deltaX;
       var animate = true;
 
       var threshold = evt.overallVelocity * percent;
+      console.log(threshold);
       // 7 is an arbitrary number that currently feels "right"
       if (threshold > 7 && evt.type == 'panend') {
         tabIndex += (percent < 0) ? 1 : -1;
@@ -115,6 +120,9 @@ function attach(container) {
     }
 
     panes.forEach(disablePreventScroll);
+    // TODO: we should only reset this flag when the scrolling is complete
+    // otherwise we keep scrolling while a panleft is happening
+    // and this can cause weird issues when continuously flinging
     isScrolling = false;
   }
 }

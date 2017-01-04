@@ -14,6 +14,10 @@ var sift = require('sift');
 var groupBy = require('group-array');
 var reduce = require('object.reduce');
 
+var history = require('history');
+var jwt = require('jsonwebtoken');
+var story = history.useQueries(history.createHistory)();
+
 var fork = require('./fork');
 
 var reducers = redux.combineReducers({
@@ -24,22 +28,39 @@ var reducers = redux.combineReducers({
       case 'data_loaded':
         return action.payload.map((card) => Object.assign({}, card, {
           expanded: false,
-          // type_display: 'Main Personality',
-          image: `http://${window.location.hostname}:8080${card.image}`
+          image: `http://${window.location.hostname}:8080${card.image}`,
+          thumbnail: `http://${window.location.hostname}:8080${card.image}`.replace('/images/', '/thumbnails/')
         }));
       default:
         return state;
     }
   },
   deck: function(state, action) {
-    state = state || [];
+    state = state || {};
+
+    var count;
+    var update = {};
 
     switch(action.type) {
       case 'add_to_deck': {
-        return state.concat(action.payload);
+        count = (state[action.payload.id] || 0) + 1;
+        update[action.payload.id] = count;
+        return Object.assign({}, state, update);
       }
       case 'remove_from_deck': {
-        return state.filter((card) => card.id !== action.payload.id);
+        count = (state[action.payload.id] || 0) - 1;
+        if (count < 0) {
+          count = 0;
+        }
+        update[action.payload.id] = count;
+        var result = Object.assign({}, state, update);
+        if (count === 0) {
+          delete result[action.payload.id];
+        }
+        return result;
+      }
+      case 'load_deck': {
+        return action.payload;
       }
       default:
         return state;
@@ -68,6 +89,53 @@ var reducers = redux.combineReducers({
       default:
         return state;
     }
+  },
+  // Phase filters
+  mpFilters: function(state, action) {
+    state = state || [ { type: 'main_personality' } ];
+
+     switch(action.type) {
+      case 'add_mp_filters':
+        return _.unionWith(state, action.payload, _.isEqual);
+      case 'remove_mp_filters':
+        return _.differenceWith(state, action.payload, _.isEqual);
+      case 'replace_mp_filters':
+        return [].concat(action.payload);
+      default:
+        return state;
+    }
+  },
+  masteryFilters: function(state, action) {
+    state = state || [ { type: 'mastery' } ];
+
+     switch(action.type) {
+      case 'add_mastery_filters':
+        return _.unionWith(state, action.payload, _.isEqual);
+      case 'remove_mastery_filters':
+        return _.differenceWith(state, action.payload, _.isEqual);
+      case 'replace_mastery_filters':
+        return [].concat(action.payload);
+      default:
+        return state;
+    }
+  },
+  cardFilters: function(state, action) {
+    state = state || [ { type: { $or: [
+      'physical_combat', 'energy_combat', 'event', 'ally', 'dragonball', 'setup', 'drill',
+      // holdovers
+      'physical combat', 'energy combat'
+      ] } } ];
+
+     switch(action.type) {
+      case 'add_card_filters':
+        return _.unionWith(state, action.payload, _.isEqual);
+      case 'remove_card_filters':
+        return _.differenceWith(state, action.payload, _.isEqual);
+      case 'replace_card_filters':
+        return [].concat(action.payload);
+      default:
+        return state;
+    }
   }
 });
 
@@ -83,66 +151,84 @@ function personalityFilter() {
       var personality = card.personality;
       var level = card.level;
       var id = card.id;
-      return {
-        type: 'add_filters',
-        payload: [
-          { $or: [ { id: id }, { level: { $ne: level } } ] },
-          { personality: { $or: [personality, { $exists: false }] } },
-          { $or: [ { alignment: alignment }, { alignment: 'neutral' } ] }
-        ]
-      };
-    })
+      return [
+        {
+          type: 'add_filters',
+          payload: [
+            // { personality: { $or: [personality, { $exists: false }] } },
+            { $or: [ { alignment: alignment }, { alignment: 'neutral' } ] }
+          ]
+        },
+        {
+          type: 'add_mp_filters',
+          payload: [
+            { type: 'main_personality', personality: personality },
+            { $or: [ { id: id }, { level: { $ne: level } } ] }
+          ]
+        },
+        {
+          type: 'add_card_filters',
+          payload: [
+            { $or: [
+              { type: 'ally', personality: { $not: personality } },
+              { type: { $not: 'ally' }, personality: { $or: [personality, { $exists: false }] } }
+            ] }
+          ]
+        }
+      ];
+    }),
+    pull.flatten()
   );
 }
 
 function masteryFilter() {
   return pull(
     pull.filter(function(incoming) {
-      return incoming.action.type === 'add_to_deck';
+      var card = incoming.action.payload;
+
+      if (incoming.action.type !== 'add_to_deck' || card.type !== 'main_personality') {
+        return false;
+      }
+
+      var deck = incoming.state.deck;
+
+      var levels = _.reduce(deck, function(acc, val, key) {
+        var card = _.find(incoming.state.cards, { id: key })
+        if (card.type === 'main_personality') {
+          return acc.concat(card.level);
+        }
+
+        return acc;
+      }, []);
+
+      return (levels.includes(1) && levels.includes(2) && levels.includes(3) && levels.includes(4));
     }),
     pull.map(function(incoming) {
-      var deck = incoming.state.deck;
-      var personality;
 
-      var levels = deck.reduce(function(acc, val) {
-        if (val.type === 'main_personality') {
-          // TODO: avoid mutation
-          personality = val.personality;
-          return acc.concat(val.level);
-        }
+      var card = incoming.action.payload;
 
-        return acc;
-      }, []);
+      var styles = ['orange', 'black', 'blue', 'red'];
 
-      var filtersToRemove = deck.reduce(function(acc, val) {
-        if (val.type === 'main_personality') {
-          return acc.concat({ $or: [ { id: val.id }, { level: { $ne: val.level } } ] });
-        }
-
-        return acc;
-      }, []);
-
-      if (levels.includes(1) && levels.includes(2) && levels.includes(3) && levels.includes(4)) {
-        return [
-          {
-            type: 'update_phase',
-            payload: 'mastery'
-          },
-          {
-            type: 'add_filters',
-            payload: [
-              { type: 'mastery' }
-            ]
-          },
-          {
-            type: 'remove_filters',
-            payload: [
-              { type: 'main_personality' },
-              { personality: personality }
-            ].concat(filtersToRemove)
-          }
-        ];
+      if (card.heritage.saiyan) {
+        styles.push('saiyan');
       }
+
+      if (card.heritage.namekian) {
+        styles.push('namekian');
+      }
+
+      return [
+        {
+          type: 'add_mastery_filters',
+          payload: [
+            { style: { $or: styles } }
+          ]
+        },
+        {
+          type: 'update_phase',
+          payload: 'mastery'
+        }
+      ];
     }),
     pull.flatten()
   );
@@ -162,18 +248,13 @@ function cardsFilter() {
             payload: 'cards'
           },
           {
-            type: 'add_filters',
+            type: 'add_card_filters',
             payload: [
-              { type: { $or: ['physical_combat', 'energy_combat', 'event', 'ally', 'dragonball', 'setup', 'drill'] } },
               // TODO: make "style"
-              // { style: ''}
-              { color: { $or: [card.style, 'freestyle'] } }
-            ]
-          },
-          {
-            type: 'remove_filters',
-            payload: [
-              { type: 'mastery' }
+              { $or: [
+                { color: card.style },
+                { style: { $or: [card.style, 'non-styled'] } }
+              ] }
             ]
           }
         ];
@@ -190,10 +271,8 @@ function initFilter() {
     }),
     pull.map(function() {
       return {
-        type: 'add_filters',
-        payload: [
-          { type: 'main_personality' }
-        ]
+        type: 'update_phase',
+        payload: 'mp'
       }
     })
   );
@@ -202,6 +281,32 @@ function initFilter() {
 var actors = createActorMiddleware({
   log: function() {
     return pull.map(console.log.bind(console));
+  },
+  capture: function() {
+    return pull(
+      pull.filter(function(incoming) {
+        return incoming.action.type === 'add_to_deck' || incoming.action.type === 'remove_from_deck';
+      }),
+      pull.map(function(incoming) {
+        // TODO: JWTs grow way too fast, need something else
+        var hash = jwt.sign(incoming.state.deck, 'test', { noTimestamp: true });
+        story.replace({ query: { deck: hash } });
+      })
+    );
+  },
+  loadCapture: function() {
+    return pull(
+      pull.filter(function(incoming) {
+        return incoming.action.type === 'load_capture';
+      }),
+      pull.map(function(incoming) {
+        var deck = jwt.verify(incoming.action.payload, 'test');
+        return {
+          type: 'load_deck',
+          payload: deck
+        };
+      })
+    );
   },
   loadData: function() {
     return pull(
@@ -227,7 +332,7 @@ var actors = createActorMiddleware({
       pull.map(function(incoming) {
         var card = incoming.action.payload;
         var deck = incoming.state.deck;
-        var used = count(deck, card.id);
+        var used = deck[card.id] || 0;
         if (used < card.limit) {
           return {
             type: 'add_to_deck',
@@ -245,7 +350,7 @@ var actors = createActorMiddleware({
       pull.map(function(incoming) {
         var card = incoming.action.payload;
         var deck = incoming.state.deck;
-        var used = count(deck, card.id);
+        var used = deck[card.id] || 0;
         if (used > 0) {
           return {
             type: 'remove_from_deck',
@@ -264,7 +369,7 @@ var actors = createActorMiddleware({
     ]);
   },
   removeFilter: function() {
-    // TODO: switch phase when a personality or mastery is removed
+    // TODO: switch to the earliest uncompleted phase
     return pull(
       pull.filter(function(incoming) {
         return incoming.action.type === 'remove_from_deck';
@@ -280,10 +385,7 @@ var actors = createActorMiddleware({
           var personalityRemain = _.some(incoming.state.deck, { personality: personality });
           var alignmentRemain = _.some(incoming.state.deck, { alignment: alignment });
 
-          var filters = [
-            { $or: [ { id: id }, { level: { $ne: level } } ] },
-          ]
-
+          var filters = [];
           if (!personalityRemain) {
             filters.push({ personality: personality });
           }
@@ -292,12 +394,36 @@ var actors = createActorMiddleware({
             filters.push({ alignment: alignment });
           }
 
-          return {
-            type: 'remove_filters',
-            payload: filters
-          };
+          var mpFilters = [
+            { $or: [ { id: id }, { level: { $ne: level } } ] }
+          ];
+
+          return [
+            {
+              type: 'update_phase',
+              payload: 'mp'
+            },
+            {
+              type: 'remove_filters',
+              payload: filters
+            },
+            {
+              type: 'remove_mp_filters',
+              payload: mpFilters
+            }
+          ];
         }
-      })
+
+        if (card.type === 'mastery') {
+          return [
+            {
+              type: 'update_phase',
+              payload: 'mastery'
+            }
+          ]
+        }
+      }),
+      pull.flatten()
     );
   }
 });
@@ -325,10 +451,28 @@ function groupMasteries(cards) {
   return flatten(grouped);
 }
 
+function groupTypes(cards) {
+  var grouped = groupBy(cards, 'type');
+  return flatten(grouped);
+}
+
 function cardListView() {
   var state = store.getState();
   // var cardList = state.cards.filter(applyFilters(state.filters)).map(cardView);
-  var cardList = filter(state.cards, state.filters);
+  var filters = state.filters;
+  if (state.phase === 'mp') {
+    filters = filters.concat(state.mpFilters);
+  }
+
+  if (state.phase === 'mastery') {
+    filters = filters.concat(state.masteryFilters);
+  }
+
+  if (state.phase === 'cards') {
+    filters = filters.concat(state.cardFilters);
+  }
+
+  var cardList = filter(state.cards, filters);
 
   var cards;
   if (state.phase === 'mp') {
@@ -340,7 +484,7 @@ function cardListView() {
   }
 
   if (state.phase === 'cards') {
-    cards = cardList.map(cardView);
+    cards = groupTypes(cardList).map(cardView);
   }
 
   return yo`<div id="card-list-pane" className="${classes.pane}">
@@ -348,9 +492,64 @@ function cardListView() {
   </div>`;
 }
 
+function groupDeck(state) {
+  var grouped = _.reduce(state.deck, function(result, count, id) {
+    var card = _.find(state.cards, { id: id });
+    var group = result[card.type];
+    group = (group || []).concat(card);
+    result[card.type] = group;
+    return result;
+  }, {});
+
+  return grouped;
+}
+
+var headers = {
+  main_personality: 'Main Personality',
+  mastery: 'Mastery',
+  physical_combat: 'Physical Combats',
+  energy_combat: 'Energy Combats',
+  setup: 'Setups',
+  ally: 'Allies',
+  drill: 'Drills',
+  dragonball: 'Dragon Balls',
+  event: 'Events'
+};
+
+var typeSortOrder = {
+  main_personality: 0,
+  mastery: 1,
+  ally: 2,
+  dragonball: 3,
+  physical_combat: 4,
+  energy_combat: 5,
+  event: 6,
+  setup: 7,
+  dril: 8
+};
+
 function deckListView() {
   var state = store.getState();
-  var deckList = state.deck.map(cardView);
+  var grouped = groupDeck(state);
+  var deckList = [];
+  var types = _.sortBy(Object.keys(grouped), function(type) {
+    return typeSortOrder[type];
+  });
+
+  types.forEach(function(type) {
+    var count = 0;
+    var cards = grouped[type].map(function(card) {
+      count += state.deck[card.id];
+      return cardView(card);
+    });
+
+    if (type === 'main_personality' || type === 'mastery') {
+      deckList.push(yo`<div className="${classes.listItemHeader}">${headers[type]}</div>`);
+    } else {
+      deckList.push(yo`<div className="${classes.listItemHeader}">${headers[type]} (${count})</div>`);
+    }
+    deckList = deckList.concat(cards);
+  });
 
   return yo`<div id="deck-list-pane" className="${classes.pane}">
     ${deckList}
@@ -442,19 +641,19 @@ function moreDetailsView(card) {
   `;
 }
 
-function count(deck, id) {
-  return _.reduce(deck, function(count, card) {
-    if (card.id === id) {
-      return count + 1;
-    } else {
-      return count;
-    }
-  }, 0);
-}
+// function count(deck, id) {
+//   return _.reduce(deck, function(count, card) {
+//     if (card.id === id) {
+//       return count + 1;
+//     } else {
+//       return count;
+//     }
+//   }, 0);
+// }
 
 function cardView(card) {
   var state = store.getState();
-  var used = count(state.deck, card.id);
+  var used = state.deck[card.id] || 0;
   var free = (card.limit - used);
   var changeButton;
   if (free) {
@@ -473,7 +672,7 @@ function cardView(card) {
 
   return yo`
     <div id=${card.id} className=${classes.listItem}>
-      <img className="${classes.cardThumbnail}" src="${card.image}" />
+      <img className="${classes.cardThumbnail}" src="${card.thumbnail || card.image}" />
       <div className="${classes.cardDetails}" onclick=${toggleExpanded.bind(null, card)}>
         <div className="${classes.cardTitle}">${card.title}</div>
         ${moreDetailsView(card)}
@@ -523,6 +722,11 @@ var tabEE = attach(paneContainerEl);
 tabEE.on('tab-shown', updateNavbar);
 
 store.dispatch({ type: 'load_data', payload: `http://${window.location.hostname}:8080/cards` });
+
+var loc = story.getCurrentLocation();
+if (loc.query && loc.query.deck) {
+  store.dispatch({ type: 'load_capture', payload: loc.query.deck });
+}
 
 var renderRequested = false;
 

@@ -1,7 +1,7 @@
 'use strict';
 
 var defaultState = {
-    hit: false,
+  hit: false,
   shuffle: false,
   discard_removal: false,
   when_entering: false,

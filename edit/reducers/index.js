@@ -18,7 +18,10 @@ module.exports = {
   stages: require('./stages'),
   has: require('./has'),
   is: require('./is'),
+  considered: require('./considered'),
   disables: require('./disables'),
+  endurance: require('./endurance'),
+  heritage: require('./heritage'),
   // Hidden fields
   image: require('./image'),
   image_file: require('./image_file'),
